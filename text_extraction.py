@@ -167,6 +167,7 @@ st.title("Streamlit_mathpix_OCR")
 st.write("")
 st.header("Bulk image processing")
 st.text("Upload a csv file to extract text")
+st.markdown('File must contain a column named **_imageUrl_**')
 
 input_csv = st.file_uploader("Choose File", type="csv", accept_multiple_files=False, key=None, help=None)
 
@@ -258,7 +259,7 @@ if len(input_url) != 0:
 st.write("")
 st.write("")
 st.header("Download processed file")
-st.text("Type in file id to download csv file")
+st.text("Type in file id to download processed file")
 dwn_file_id = st.text_input("file_ID")
 
 if dwn_file_id != "":
