@@ -31,7 +31,6 @@ def mathpix_text_asciimath_textapi(url):
     tries = 3
     errored_files = []
 
-    time.sleep(1)
     data = {
         "src": url,
         "formats": ["data", "text"],
@@ -182,7 +181,7 @@ if input_csv != None:
 
         # Using multiprocessing pool;
             start_time = datetime.datetime.now()
-            with Pool(processes=10) as pool:
+            with Pool(processes=128) as pool:
                 for i in stqdm(pool.imap(mathpix_text_asciimath_textapi, files), total=100):
                     result.append(i)
             time_taken = datetime.datetime.now() - start_time
