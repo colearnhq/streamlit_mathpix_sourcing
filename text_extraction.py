@@ -12,6 +12,8 @@ from stqdm import stqdm
 from multiprocessing import Pool
 import boto3
 from io import StringIO
+import logging
+import collections
 
 
 client = boto3.client('s3',
@@ -27,6 +29,30 @@ app_id = st.secrets["app_id"]
 app_key = st.secrets["app_key"]
 
 
+class TailLogHandler(logging.Handler):
+
+    def __init__(self, log_queue):
+        logging.Handler.__init__(self)
+        self.log_queue = log_queue
+
+    def emit(self, record):
+        self.log_queue.append(self.format(record))
+
+
+class TailLogger(object):
+
+    def __init__(self, maxlen):
+        self._log_queue = collections.deque(maxlen=maxlen)
+        self._log_handler = TailLogHandler(self._log_queue)
+
+    def contents(self):
+        return '\n'.join(self._log_queue)
+
+    @property
+    def log_handler(self):
+        return self._log_handler
+
+      
 def mathpix_text_asciimath_textapi(url):
     tries = 3
     errored_files = []
@@ -37,6 +63,7 @@ def mathpix_text_asciimath_textapi(url):
         "data_options": {"include_asciimath": True},
         "include_smiles": True
     }
+    
     for i in range(tries):
         try:
             r = requests.post("https://api.mathpix.com/v3/text",
@@ -56,11 +83,12 @@ def mathpix_text_asciimath_textapi(url):
                 response["text"] = 'error'
                 response["data"] = 'error'
                 print(e)
+                logger.error(f"Error Processing : {url} {e}")
 
     # return response['text'], response['data']
     return response
 
-
+  
 def replacement_function(text):
     text = text.replace('\\mathrm{~cm}', 'cm')
     text = text.replace('\\mathrm{~jam}', 'jam')
@@ -139,13 +167,11 @@ def replacement_function(text):
     text = text.replace('\\x |', '{x |')
     return text
 
-
 def extract_t(i):
     try:
         return replacement_function(i['text'])
     except:
         return None
-
 
 def extract_d(i):
     try:
@@ -172,40 +198,12 @@ input_csv = st.file_uploader("Choose File", type="csv", accept_multiple_files=Fa
 
 if input_csv != None:
     image_data = pd.read_csv(input_csv)
-    # image_data = image_data[0:10]
+    #image_data = image_data[0:2]
     files = image_data['imageUrl'].values
     result = []
 
     if st.button('Process File'):
-        with st.spinner('Extracting Text from Image ...'):
-
-        # Using multiprocessing pool;
-            start_time = datetime.datetime.now()
-            with Pool(processes=128) as pool:
-                for i in stqdm(pool.imap(mathpix_text_asciimath_textapi, files), total=100):
-                    result.append(i)
-            time_taken = datetime.datetime.now() - start_time
-
-        # # Using joblib parallel
-        #     start_time = datetime.datetime.now()
-        #     for i in stqdm(Parallel(n_jobs=4, prefer='threads', verbose=10)(delayed(mathpix_text_asciimath_textapi)(i) for i in files), total=100):
-        #         result.append(i)
-        #     time_taken = datetime.datetime.now() - start_time
-
-            text_df = image_data
-            text_df['extracted_text'] = [extract_t(i) for i in result]
-            text_df['extracted_equation'] = [extract_d(i) for i in result]
-
-        st.success('Done!')
-        st.write("Total time taken : " + str(time_taken))
-
-        st.text(f"Processed Files : {len(text_df)}")
-        st.text(f"Successful Files : {len(text_df[text_df['extracted_text'] != 'error'])}")
-        st.text(f"Error Files : {len(text_df[text_df['extracted_text'] == 'error'])}")
-
-
         # Connecting to S3
-
         # Reading file_id file
         file_name = 'processed_file_id.csv'
         file = prefix + file_name
@@ -215,12 +213,65 @@ if input_csv != None:
         all_file_ids = list(previous_file['file_id'].values)
         last_file_id = all_file_ids[-1]
         curr_id = last_file_id+1
+
+        log_filename = f"process_log_{curr_id}.txt"
+
+        logger = logging.getLogger("__process__") # Creating logging variable
+        logger.setLevel(logging.DEBUG) # Set the minimun level of loggin to DEBUG
+        
+        formatter = logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s") # Logging format that will appear in the log file
+        
+        tail = TailLogger(10)
+
+        log_handler = tail.log_handler #variable log handler
+        log_handler.setFormatter(formatter) #set formatter to handler
+        
+        logger.addHandler(log_handler) # Adding file handler to logger
+
+        logger.info("Bulk image processing start")
+        with st.spinner('Extracting Text from Image ...'):
+        
+        # Using multiprocessing pool;
+            start_time = datetime.datetime.now()
+            with Pool(processes=128) as pool:
+                try:
+                    for i in stqdm(pool.imap(mathpix_text_asciimath_textapi, files), total=len(files)):
+                        result.append(i)
+                
+                except Exception as ex:
+                    logger.error(f"An exception of type {type(ex).__name__} occurred. Arguments: {ex.args}")
+
+            time_taken = datetime.datetime.now() - start_time
+            logger.info("Bulk image processing finished")
+            text_df = image_data
+            text_df['extracted_text'] = [extract_t(i) for i in result]
+            text_df['extracted_equation'] = [extract_d(i) for i in result]
+
+        st.success('Done!')
+        st.write("Total time taken : " + str(time_taken))
+        st.text(f"Processed Files : {len(text_df)}")
+        st.text(f"Successful Files : {len(text_df[text_df['extracted_text'] != 'error'])}")
+        st.text(f"Error Files : {len(text_df[text_df['extracted_text'] == 'error'])}")
+
         st.write("")
         st.write("current_file_id : " + str(curr_id))
         all_file_ids.append(curr_id)
         current_file = pd.DataFrame(all_file_ids, columns=['file_id'])
 
+        #logging
+        logger.info("Total time taken : " + str(time_taken))
+        logger.info(f"Processed Files : {len(text_df)}")
+        logger.info(f"Successful Files : {len(text_df[text_df['extracted_text'] != 'error'])}")
+        logger.info(f"Error Files : {len(text_df[text_df['extracted_text'] == 'error'])}")
+        logger.info(f"Files ID : {curr_id}")
 
+        val_log = tail.contents()
+
+        log_handler.close()
+        logging.shutdown()
+        logger.removeHandler(log_handler)
+        del logger, log_handler
+        
         # Writing updated file_id and new processed file
         output_file_names = ['sourcing_mathpix_'+str(curr_id)+'.csv', 'processed_file_id.csv']
         output_files = [text_df, current_file]
@@ -234,6 +285,14 @@ if input_csv != None:
                     response = client.put_object(Bucket=bucket, Key=output_file, Body=csv_buffer.getvalue())
             except Exception as e:
                 print(e)
+        
+        # Saving the log file to S3
+        try:
+            client.put_object(Bucket=bucket, Key=prefix + log_filename, Body=val_log)
+            print(prefix + log_filename)
+            print(val_log)
+        except Exception as e:
+            print(e)
 
 
 #single image section
