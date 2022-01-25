@@ -233,7 +233,7 @@ if input_csv != None:
         
         # Using multiprocessing pool;
             start_time = datetime.datetime.now()
-            with Pool(processes=128) as pool:
+            with Pool(processes=32) as pool:
                 try:
                     for i in stqdm(pool.imap(mathpix_text_asciimath_textapi, files), total=len(files)):
                         result.append(i)
