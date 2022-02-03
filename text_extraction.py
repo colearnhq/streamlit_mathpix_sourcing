@@ -2,19 +2,16 @@ import streamlit as st
 from PIL import Image
 import requests
 import pandas as pd
-import os
-import base64
-import json
-from joblib import Parallel, delayed
 import datetime
-import time
 from stqdm import stqdm
-from multiprocessing import Pool
 import boto3
 from io import StringIO
 import logging
 import collections
-
+import asyncio
+import aiohttp
+from math import ceil
+from time import sleep
 
 client = boto3.client('s3',
                       aws_access_key_id=st.secrets["access_key"],
@@ -23,7 +20,6 @@ client = boto3.client('s3',
 
 bucket = st.secrets["bucket"]
 prefix = st.secrets["prefix"]
-
 
 app_id = st.secrets["app_id"]
 app_key = st.secrets["app_key"]
@@ -51,11 +47,10 @@ class TailLogger(object):
     @property
     def log_handler(self):
         return self._log_handler
-
       
-def mathpix_text_asciimath_textapi(url):
+async def mathpix_text_asciimath_textapi(logger, session, url):
     tries = 3
-    errored_files = []
+    global error_amount
 
     data = {
         "src": url,
@@ -66,29 +61,49 @@ def mathpix_text_asciimath_textapi(url):
     
     for i in range(tries):
         try:
-            r = requests.post("https://api.mathpix.com/v3/text",
+            r = session.post("https://api.mathpix.com/v3/text",
                               json=data,
                               headers={
                                   "app_id": app_id,
                                   "app_key": app_key,
                                   "Content-type": "application/json"
                               })
-            response = r.json()
+            response = await r
+            return response
         except Exception as e:
             if i < (tries - 1):
                 continue
             else:
-                errored_files.append(url)
-                response = {}
-                response["text"] = 'error'
-                response["data"] = 'error'
                 print(e)
-                logger.error(f"Error Processing : {url} {e}")
+                logger.error(f"Error Processing : {url} {e}") # error logging
+                error_amount += 1
 
-    # return response['text'], response['data']
+    return asyncio.sleep(1) # returning none if process error
+
+# regular mathpix function without async
+def regular_mathpix(url):
+    data = {
+        "src": url,
+        "formats": ["data", "text"],
+        "data_options": {"include_asciimath": True},
+        "include_smiles": True
+    }
+    
+    try:
+        r = requests.post("https://api.mathpix.com/v3/text",
+                            json=data,
+                            headers={
+                                "app_id": app_id,
+                                "app_key": app_key,
+                                "Content-type": "application/json"
+                            })
+        response = r.json()
+
+    except Exception as e:
+        response = e
+
     return response
 
-  
 def replacement_function(text):
     text = text.replace('\\mathrm{~cm}', 'cm')
     text = text.replace('\\mathrm{~jam}', 'jam')
@@ -179,17 +194,51 @@ def extract_d(i):
     except:
         return None
 
+def get_task(logger, session, start_index, end_index):
+    tasks = []
+    
+    for i in files[start_index:end_index]:
+        tasks.append(mathpix_text_asciimath_textapi(logger, session, i))
+    return tasks
+
+async def math_calls(logger):
+    async with aiohttp.ClientSession() as session:
+        for i in stqdm(range(ceil(file_len / batch_count))):
+            process_start = datetime.datetime.now()
+
+            if (i+1)*batch_count < file_len:
+                tasks = get_task(logger, session, i*batch_count, (i+1)*batch_count)
+            else:
+                tasks = get_task(logger, session, i*batch_count, file_len)
+
+            responses = await asyncio.gather(*tasks)
+            for response in responses:
+                if type(response) == aiohttp.ClientResponse:
+                    result.append(await response.json())
+                else:
+                    result.append(await response)
+            
+            process_taken = datetime.datetime.now() - process_start
+            logger.debug(f"{i} - {process_taken}")
+            if process_taken.seconds < batch_timing:
+                sleep(batch_timing-process_taken.seconds)
+
 @st.cache
 def convert_df(df):
-    # IMPORTANT: Cache the conversion to prevent computation on every rerun
     return df.to_csv().encode('utf-8')
 
+
+# === SIDEBAR ===
 st.sidebar.title("Text Extraction App")
 st.sidebar.write("")
 st.sidebar.write("OCR text extraction from single or bulk images")
 
+# === TITLE ===
 st.title("Streamlit_mathpix_OCR")
 st.write("")
+
+
+# === BULK IMAGE PROCESSING SECTION ===
 st.header("Bulk image processing")
 st.text("Upload a csv file to extract text")
 st.markdown('File must contain a column named **_imageUrl_**')
@@ -198,11 +247,16 @@ input_csv = st.file_uploader("Choose File", type="csv", accept_multiple_files=Fa
 
 if input_csv != None:
     image_data = pd.read_csv(input_csv)
-    #image_data = image_data[0:2]
+    #image_data = image_data[0:15]
     files = image_data['imageUrl'].values
-    result = []
+    file_len = len(files) #total amount of file in the csv
+    batch_count = 100 # amount of API call send every async batch
+    batch_timing = ceil(60/1000*batch_count)
 
     if st.button('Process File'):
+        result = []
+        error_amount = 0
+
         # Connecting to S3
         # Reading file_id file
         file_name = 'processed_file_id.csv'
@@ -214,65 +268,65 @@ if input_csv != None:
         last_file_id = all_file_ids[-1]
         curr_id = last_file_id+1
 
-        log_filename = f"process_log_{curr_id}.txt"
-
-        logger = logging.getLogger("__process__") # Creating logging variable
-        logger.setLevel(logging.DEBUG) # Set the minimun level of loggin to DEBUG
+        # logging initialization
+        log_filename = f"process_log_{curr_id}.txt" # the name of the log file
+        logger = logging.getLogger("__process__") # creating logging variable
+        logger.setLevel(logging.DEBUG) # set the minimun level of loggin to DEBUG
+        formatter = logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s") # logging format that will appear in the log file
+        tail = TailLogger(10000) # amount of log that is saved
+        log_handler = tail.log_handler # variable log handler
+        log_handler.setFormatter(formatter) # set formatter to handler
+        logger.addHandler(log_handler) # adding file handler to logger
         
-        formatter = logging.Formatter("[%(asctime)s] %(levelname)-8s %(message)s") # Logging format that will appear in the log file
-        
-        tail = TailLogger(10)
-
-        log_handler = tail.log_handler #variable log handler
-        log_handler.setFormatter(formatter) #set formatter to handler
-        
-        logger.addHandler(log_handler) # Adding file handler to logger
-
-        logger.info("Bulk image processing start")
         with st.spinner('Extracting Text from Image ...'):
-        
-        # Using multiprocessing pool;
             start_time = datetime.datetime.now()
-            with Pool(processes=32) as pool:
-                try:
-                    for i in stqdm(pool.imap(mathpix_text_asciimath_textapi, files), total=len(files)):
-                        result.append(i)
-                
-                except Exception as ex:
-                    logger.error(f"An exception of type {type(ex).__name__} occurred. Arguments: {ex.args}")
+            logger.info("Bulk image processing start")
+            
+            asyncio.run(math_calls(logger)) #starting async process
 
             time_taken = datetime.datetime.now() - start_time
             logger.info("Bulk image processing finished")
+
+            # extracting the result
             text_df = image_data
             text_df['extracted_text'] = [extract_t(i) for i in result]
             text_df['extracted_equation'] = [extract_d(i) for i in result]
 
+        # process info
         st.success('Done!')
-        st.write("Total time taken : " + str(time_taken))
-        st.text(f"Processed Files : {len(text_df)}")
-        st.text(f"Successful Files : {len(text_df[text_df['extracted_text'] != 'error'])}")
-        st.text(f"Error Files : {len(text_df[text_df['extracted_text'] == 'error'])}")
-
+        st.text("Total time taken : " + str(time_taken))
         st.write("")
-        st.write("current_file_id : " + str(curr_id))
+        st.text(f"Processed Files : {len(text_df)}")
+        st.text(f"Successful Files : {len(text_df) - error_amount}")
+        st.text(f"Error Files : {error_amount}")
+        st.write("")
+        st.text(f"Text Result : {len(text_df[~text_df['extracted_text'].isna()])}")
+        st.text(f"None Result : {len(text_df[text_df['extracted_text'].isna()])}")
+
+        # file id for upload and download to s3
+        st.write("")
+        st.text("current_file_id : " + str(curr_id))
         all_file_ids.append(curr_id)
         current_file = pd.DataFrame(all_file_ids, columns=['file_id'])
 
         #logging
         logger.info("Total time taken : " + str(time_taken))
         logger.info(f"Processed Files : {len(text_df)}")
-        logger.info(f"Successful Files : {len(text_df[text_df['extracted_text'] != 'error'])}")
-        logger.info(f"Error Files : {len(text_df[text_df['extracted_text'] == 'error'])}")
+        logger.info(f"Successful Files : {len(text_df) - error_amount}")
+        logger.info(f"Error Files : {error_amount}")
+        logger.info(f"Text Result : {len(text_df[~text_df['extracted_text'].isna()])}")
+        logger.info(f"None Result : {len(text_df[text_df['extracted_text'].isna()])}")
         logger.info(f"Files ID : {curr_id}")
 
-        val_log = tail.contents()
+        val_log = tail.contents() # extracting the log 
 
+        # deleting all loggin variable for the current process
         log_handler.close()
         logging.shutdown()
         logger.removeHandler(log_handler)
         del logger, log_handler
         
-        # Writing updated file_id and new processed file
+        # writing updated file_id and new processed file
         output_file_names = ['sourcing_mathpix_'+str(curr_id)+'.csv', 'processed_file_id.csv']
         output_files = [text_df, current_file]
 
@@ -286,7 +340,7 @@ if input_csv != None:
             except Exception as e:
                 print(e)
         
-        # Saving the log file to S3
+        # saving the log file to S3
         try:
             client.put_object(Bucket=bucket, Key=prefix + log_filename, Body=val_log)
             print(prefix + log_filename)
@@ -295,7 +349,7 @@ if input_csv != None:
             print(e)
 
 
-#single image section
+# === SINGLE IMAGE SECTION ===
 st.write("")
 st.write("")
 st.header("Single image processing")
@@ -304,16 +358,20 @@ st.text("Enter image URL to extract text")
 input_url = st.text_input("image_URL")
 
 if len(input_url) != 0:
-    im = Image.open(requests.get(input_url, stream=True).raw)
-    st.image(im)
+    try:
+        im = Image.open(requests.get(input_url, stream=True).raw)
+        st.image(im)
+        output_math = regular_mathpix(input_url)
+        try:
+            st.text(f'Extracted Text : {output_math["text"]}')
+            st.text(f'Extracted Equation : {output_math["data"][0]["value"]}')
+        except:
+            st.text(f'Extracted Equation : None')
+    except:
+        st.text("Error processing, the URL is not an image")
 
-    output_math = mathpix_text_asciimath_textapi(input_url)
-    st.text(f"Input URL : {input_url}")
-    st.text(f'Extracted Text : {output_math["text"]}')
-    st.text(f'Extracted Equation : {output_math["data"][0]["value"]}')
 
-
-# Download Section
+# === DOWNLOAD SECTION ===
 st.write("")
 st.write("")
 st.header("Download processed file")
