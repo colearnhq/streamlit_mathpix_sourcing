@@ -12,6 +12,7 @@ import asyncio
 import aiohttp
 from math import ceil
 from time import sleep
+import re
 
 client = boto3.client('s3',
                       aws_access_key_id=st.secrets["access_key"],
