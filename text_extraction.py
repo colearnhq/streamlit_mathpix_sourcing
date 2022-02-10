@@ -235,7 +235,7 @@ def replacement_function(text):
     text = text.replace("kurungtutupkurawal","}")
     text = text.replace(r"\sqrt{", "akar(")
 
-    regex_list = [r"\\mathrm[({]([a-zA-Z0-9]*)[})]", r"\\operatorname[({]([a-zA-Z0-9]*)[})]"]
+    regex_list = [r"\\mathrm[({]([a-zA-Z0-9~]*)[})]", r"\\operatorname[({]([a-zA-Z0-9~]*)[})]"]
 
     for i in regex_list:
         try:
