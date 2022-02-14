@@ -104,8 +104,28 @@ def regular_mathpix(url):
         response = e
 
     return response
-
   
+# Python Escape Character
+# \\
+# \'
+# \"
+# \a
+# \b
+# \f
+# \n
+# \r
+# \t
+
+regex_extract_list = [
+                      r"\\mathrm[({]([a-zA-Z0-9~]*)[})]",
+                      r"\\operatorname[({]([a-zA-Z0-9~]*)[})]"
+]
+
+regex_remove_list = [
+                     r"\\begin{[a-zA-Z0-9|:]*}{[a-zA-Z0-9|:]*}",
+                     r"\\end{[a-zA-Z0-9|:]*}"
+]
+
 def replacement_function(text):
     text = text.replace('\\mathrm{~cm}', 'cm')
     text = text.replace('\\mathrm{~jam}', 'jam')
@@ -114,6 +134,21 @@ def replacement_function(text):
     text = text.replace('\\mathrm{~dm}', 'dm')
     text = text.replace('\\mathrm{~kg}', 'kg')
     text = text.replace('\\mathrm{~m}', 'm')
+    
+    # extraction regex
+    for i in regex_extract_list:
+        try:
+            text = re.sub(i, r"\1", text)
+        except:
+            continue
+    
+    # removing regex
+    for i in regex_remove_list:
+        try:
+            text = re.sub(i, '', text)
+        except:
+            continue
+
     text = text.replace('\\mathrm{cm}', 'cm')
     text = text.replace('\\mathrm{jam}', 'jam')
     text = text.replace('\\mathrm{Rp.}', 'Rp.')
@@ -146,7 +181,7 @@ def replacement_function(text):
     text = text.replace("\\ldots", "...")
     text = text.replace("\\cdots", "..")
     text = text.replace("\\cdot", ".")
-    text = text.replace('^{\circ}', '')
+    text = text.replace(r'^{\circ}', '')
     text = text.replace('\\circ', 'o')
     text = text.replace('\\sqrt{x}', 'akar(x)')
     text = text.replace('\\operatorname{dan}', 'dan')
@@ -158,6 +193,7 @@ def replacement_function(text):
     text = text.replace('\\vec', 'vec')
     text = text.replace('\\hat', 'hat')
     text = text.replace('\\text', '')
+    text = text.replace('\text', '')
     text = text.replace('\\left', '')
     text = text.replace('\\right', '')
     text = text.replace('\\bar', '')
@@ -168,7 +204,7 @@ def replacement_function(text):
     text = text.replace('\\boldsymbol', '')
     text = text.replace('\\rightarrow', '->')
     text = text.replace('\\lim', 'lim ')
-    text = text.replace('\\(y^{\prime}', 'y` ')
+    text = text.replace(r'\(y^{\prime}', 'y` ')
     text = text.replace('\\int_', 'integral dari')
     text = text.replace('\\times', 'x')
     text = text.replace('\\cong', 'kongruen')
@@ -209,7 +245,6 @@ def replacement_function(text):
     text = text.replace(r"\multicolumn", "")
     text = text.replace(r"^{\prime}", "\'")
     text = text.replace(r"\div", "/")
-
     text = text.replace(r"vec{\imath}", "i")
     text = text.replace(r"vec{\jmath}", "j")
     text = text.replace(r"vec{\kmath}", "k")
@@ -226,41 +261,22 @@ def replacement_function(text):
     text = text.replace("vec{u}", "u")
     text = text.replace("vec{v}", "v")
     text = text.replace("vec{w}", "w")
-    text = text.replace(r"\frac{", "(")
+    text = text.replace("\\frac{", "(")
     text = text.replace("}{", ")/(")
-    text = text.replace(r"\{", "kurungbukakurawal")
-    text = text.replace(r"\}", "kurungtutupkurawal")
+    text = text.replace("\\{", "kurungbukakurawal")
+    text = text.replace("\\}", "kurungtutupkurawal")
     text = text.replace("}", ")")
     text = text.replace("_{", "_(")
     text = text.replace("kurungbukakurawal", "{")
     text = text.replace("kurungtutupkurawal","}")
     text = text.replace(r"\sqrt{", "akar(")
-
-    regex_list = [r"mathrm[({]([a-zA-Z0-9~]*)[})]", 
-                  r"operatorname[({]([a-zA-Z0-9~]*)[})]", 
-                  r"\\mathrm[({]([a-zA-Z0-9~]*)[})]", 
-                  r"\\operatorname[({]([a-zA-Z0-9~]*)[})]", 
-                  r"mathrm[({]([a-zA-Z0-9~]*)[})]", 
-                  r"operatorname[({]([a-zA-Z0-9~]*)[})]", 
-                  r"\\mathrm[({]([a-zA-Z0-9~]*)[})]", 
-                  r"\\operatorname[({]([a-zA-Z0-9~]*)[})]"]
-
-    for i in regex_list:
-        try:
-            # result_regex = re.findall(i, text)
-            # #print(result_regex)
-            # for o in range(len(result_regex)):
-            #     temp_hold = re.search(i, text)
-            #     #print(temp_hold)
-            #     text = text.replace(temp_hold.group(0), result_regex[o], 1)
-            text = re.sub(i, r"\1", text)
-        except:
-            continue
-    
+    text = text.replace("^{", "^(")
+    text = text.replace(r"\rfloor", " ]")
+    text = text.replace(r"\lfloor", "[ ")
     text = text.replace(r"\\", "")
     text = text.replace(r"\\\\", "")
     text = text.replace("\\", "")
-
+    text = text.replace("\\\\", "")
     return text
   
 
