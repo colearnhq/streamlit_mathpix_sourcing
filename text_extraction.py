@@ -312,7 +312,11 @@ async def math_calls(logger):
             responses = await asyncio.gather(*tasks)
             for response in responses:
                 if type(response) == aiohttp.ClientResponse:
-                    result.append(await response.json())
+                    try:
+                        result.append(await response.json())
+                    except Exception as e:
+                        result.append(None)
+                        logger.error(f"Error Happen : {e}")
                 else:
                     result.append(await response)
             
