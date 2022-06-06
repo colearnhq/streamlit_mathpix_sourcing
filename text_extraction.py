@@ -148,7 +148,7 @@ def replacement_function(text):
             text = re.sub(i, '', text)
         except:
             continue
-
+    
     text = text.replace('\\mathrm{cm}', 'cm')
     text = text.replace('\\mathrm{jam}', 'jam')
     text = text.replace('\\mathrm{Rp.}', 'Rp.')
@@ -277,6 +277,8 @@ def replacement_function(text):
     text = text.replace(r"\\\\", "")
     text = text.replace("\\", "")
     text = text.replace("\\\\", "")
+    text = text.replace('~', '')
+
     return text
   
 
@@ -466,7 +468,9 @@ if len(input_url) != 0:
         output_math = regular_mathpix(input_url)
         try:
             st.text(f'Extracted Text : {output_math["text"]}')
-            st.text(f'Extracted Equation : {output_math["data"][0]["value"]}')
+            #st.text(f'Extracted Equation : {output_math["data"][0]["value"]}')
+            cln_text = replacement_function(output_math['text'])
+            st.text(f'Cleaned Output : {cln_text}')
         except:
             st.text(f'Extracted Equation : None')
     except:
