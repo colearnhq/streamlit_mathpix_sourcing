@@ -155,7 +155,7 @@ def replacement_function(text):
     text = text.replace('\\mathrm{Hz}', 'Hz')
     text = text.replace('\\mathrm{dm}', 'dm')
     text = text.replace('\\mathrm{kg}', 'kg')
-    text = text.replace('\\mathrm{P}', 'kg')
+    text = text.replace('\\mathrm{P}', 'P')
     text = text.replace('\\mathrm{m}', 'm')
     text = text.replace('\\mathrm{q}', 'q')
     text = text.replace('\\mathrm{r}', 'r')
