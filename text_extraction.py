@@ -347,6 +347,24 @@ async def math_calls(logger):
 def convert_df(df):
     return df.to_csv().encode('utf-8')
 
+def check_limit():
+    limit_name = 'daily_limit.csv'
+    limit_file = prefix + limit_name
+    obj = client.get_object(Bucket=bucket, Key=limit_file)
+    daily_process_df = pd.read_csv(obj['Body'])  # 'Body' is a key word
+
+    try:
+        #getting the current date if there is already any
+        todays_proc_def = int(daily_process_df[daily_process_df['date'] == f'{str(datetime.date.today())}']['proc_qty'])
+    except:
+        #if not, create new date for the dataframe
+        todays_proc_def = 0
+        daily_process_df = pd.concat([daily_process_df, pd.DataFrame([{'date': f'{str(datetime.date.today())}', 'proc_qty': 0}])])
+    
+    return todays_proc_def, daily_process_df
+
+todays_proc, daily_process = check_limit()
+daily_limit_amount = 1000
 
 # === SIDEBAR ===
 st.sidebar.title("Text Extraction App")
@@ -354,26 +372,42 @@ st.sidebar.write("")
 st.sidebar.write("OCR text extraction from single or bulk images")
 
 # === TITLE ===
-st.title("Streamlit_mathpix_OCR")
+st.title("Streamlit Mathpix OCR")
 st.write("")
 
 
 # === BULK IMAGE PROCESSING SECTION ===
-st.header("Bulk image processing")
-st.text("Upload a csv file to extract text")
-st.markdown('File must contain a column named **_imageUrl_**')
+st.header("Bulk Image Processing")
+col1, col2, col3 = st.columns([5,1,1])
+
+with col1:
+    st.text("Upload a csv file to extract text")
+    st.markdown('File must contain a column named **_imageUrl_**')
+
+with col2:
+    st.metric("Processed", f"{todays_proc}")
+
+with col3:
+    limit_left = daily_limit_amount-todays_proc
+    if limit_left < 0:
+        limit_left = 0
+    st.metric("Limit", limit_left)
 
 input_csv = st.file_uploader("Choose File", type="csv", accept_multiple_files=False, key=None, help=None)
 
 if input_csv != None:
     image_data = pd.read_csv(input_csv)
-    #image_data = image_data[0:15]
     files = image_data['imageUrl'].values
     file_len = len(files) #total amount of file in the csv
     batch_count = 100 # amount of API call send every async batch
     batch_timing = ceil(60/1000*batch_count)
 
-    if st.button('Process File'):
+    todays_proc, daily_process = check_limit()
+
+    if daily_limit_amount-(file_len + todays_proc) < 0:
+        st.error("Limit is reached, please try tomorrow")
+
+    if (st.button('Process File')) and (daily_limit_amount-(file_len + todays_proc) >= 0):
         result = []
         error_amount = 0
 
@@ -436,7 +470,7 @@ if input_csv != None:
         logger.info(f"Error Files : {error_amount}")
         logger.info(f"Text Result : {len(text_df[~text_df['extracted_text'].isna()])}")
         logger.info(f"None Result : {len(text_df[text_df['extracted_text'].isna()])}")
-        logger.info(f"Files ID : {curr_id}")
+        logger.info(f"File ID : {curr_id}")
 
         val_log = tail.contents() # extracting the log 
 
@@ -445,12 +479,15 @@ if input_csv != None:
         logging.shutdown()
         logger.removeHandler(log_handler)
         del logger, log_handler
+
+        todays_proc, daily_process = check_limit()
+        daily_process.loc[daily_process['date'] == f'{str(datetime.date.today())}', 'proc_qty'] = todays_proc + file_len # updating the number of file in csv
         
         # writing updated file_id and new processed file
-        output_file_names = ['sourcing_mathpix_'+str(curr_id)+'.csv', 'processed_file_id.csv']
-        output_files = [text_df, current_file]
+        output_file_names = ['sourcing_mathpix_'+str(curr_id)+'.csv', 'processed_file_id.csv', 'daily_limit.csv']
+        output_files = [text_df, current_file, daily_process]
 
-        for i in range(2):
+        for i in range(3):
             try:
                 with StringIO() as csv_buffer:
                     output_files[i].to_csv(csv_buffer, index=False)
@@ -472,10 +509,10 @@ if input_csv != None:
 # === SINGLE IMAGE SECTION ===
 st.write("")
 st.write("")
-st.header("Single image processing")
+st.header("Single Image Processing")
 st.text("Enter image URL to extract text")
 
-input_url = st.text_input("image_URL")
+input_url = st.text_input("Image URL")
 
 if len(input_url) != 0:
     try:
@@ -496,9 +533,9 @@ if len(input_url) != 0:
 # === DOWNLOAD SECTION ===
 st.write("")
 st.write("")
-st.header("Download processed file")
+st.header("Download Processed File")
 st.text("Type in file id to download processed file")
-dwn_file_id = st.text_input("file_ID")
+dwn_file_id = st.text_input("File ID")
 
 if dwn_file_id != "":
     dwn_file_name = 'sourcing_mathpix_'+str(dwn_file_id)+'.csv'
