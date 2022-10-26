@@ -310,6 +310,12 @@ def extract_d(i):
     except:
         return None
 
+def extract_r(i):
+    try:
+        return i['text']
+    except:
+        return None
+
 def get_task(logger, session, start_index, end_index):
     tasks = []
     
@@ -445,6 +451,7 @@ if input_csv != None:
             text_df = image_data
             text_df['extracted_text'] = [extract_t(i) for i in result]
             text_df['extracted_equation'] = [extract_d(i) for i in result]
+            text_df['extracted_raw_text'] = [extract_r(i) for i in result] # extract raw text from mathpix
 
         # process info
         st.success('Done!')
